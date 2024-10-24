@@ -1,3 +1,4 @@
 tensorflow<2.18
 keras-rl2
 stable-baselines3
+poke_env
