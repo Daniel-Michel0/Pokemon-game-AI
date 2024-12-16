@@ -16,6 +16,7 @@ import sys
 import random
 import time
 
+
 GEN_9_DATA = GenData.from_gen(9)
 
 class DoubleBattleRLPlayer(Gen9EnvSinglePlayer):
@@ -40,10 +41,12 @@ class DoubleBattleRLPlayer(Gen9EnvSinglePlayer):
         :param battle: La batalla en la que actuar.
         :return: La orden correspondiente para enviar al servidor.
         """
-
+        
         targets = battle.opponent_active_pokemon
+        #print(f"Targets: {targets}")
         switches = battle.available_switches[0] if len(battle.available_switches) > 0 else battle.available_switches[1]
-
+        #print(f"Switches: {switches}")
+        #print(f"Action: {action}, Available moves: {battle.available_moves}, Can Tera: {battle.can_tera}")
         if action == -1:
             # Si la acción es -1, se forfeit la batalla.
             return ForfeitBattleOrder()
@@ -77,7 +80,7 @@ class DoubleBattleRLPlayer(Gen9EnvSinglePlayer):
             # Selección del objetivo para el movimiento
             move = battle.available_moves[0][action - 16]
             # En batallas dobles, el movimiento debe dirigirse a uno de los Pokémon enemigos
-            target = np.random.choice([1,2])  # Aquí elegimos el Pokémon enemigo activo
+            target = np.random.choice([1,2])  # Aquí elegimos el Pokémon enemigo activo 
             first_order = self.agent.create_order(order = move, move_target=target, terastallize=True)
             move = battle.available_moves[1][action - 16]
             target = np.random.choice([1,2])
@@ -97,18 +100,59 @@ class DoubleBattleRLPlayer(Gen9EnvSinglePlayer):
         else:
             print("Action is invalid")
             return self.agent.choose_random_doubles_move(battle)
+            '''
+            # Aquí se hace una selección aleatoria de un movimiento
+            move = battle.available_moves[0][random.randint(0, len(battle.available_moves[0]) - 1)]
+            # En batallas dobles, se selecciona el objetivo aleatorio también
+            target = np.random.choice([1,2])
+            first_order = self.agent.create_order(order= move, move_target=target)
+            move = battle.available_moves[1][random.randint(0, len(battle.available_moves[1]) - 1)]
+            target = np.random.choice([1,2])
+            second_order = self.agent.create_order(order= move, move_target=target)
+            print(f"First order: {first_order}, Second order: {second_order}")
+            order = DoubleBattleOrder(first_order, second_order)
+            print(order)
+            
+            
+            return order'''
 
     def embed_battle(self, battle: DoubleBattle):
         """
-        Embedding personalizado del estado del combate.
+        Custom embedding of the battle state for Double Battles.
         """
-        # Aquí puedes agregar una representación numérica del estado del combate
-        return [0,0,0,0,0,0,0,0,0,0]  # Placeholder para una representación válida
+        # Get HP fraction of active Pokémon, safely handling None
+        hp_p1a = battle.active_pokemon[0].current_hp_fraction if battle.active_pokemon[0] else 0.0
+        hp_p1b = battle.active_pokemon[1].current_hp_fraction if len(battle.active_pokemon) > 1 and battle.active_pokemon[1] else 0.0
 
+        # Get HP fraction of opponent Pokémon, safely handling None
+        hp_p2a = battle.opponent_active_pokemon[0].current_hp_fraction if battle.opponent_active_pokemon[0] else 0.0
+        hp_p2b = battle.opponent_active_pokemon[1].current_hp_fraction if len(battle.opponent_active_pokemon) > 1 and battle.opponent_active_pokemon[1] else 0.0
+
+        # Moves available for active Pokémon, handling potential None
+        moves_p1a = len(battle.available_moves[0]) if battle.available_moves and battle.available_moves[0] else 0
+        moves_p1b = len(battle.available_moves[1]) if len(battle.available_moves) > 1 and battle.available_moves[1] else 0
+
+        return np.array([
+            hp_p1a,  # HP of first active Pokémon
+            hp_p1b,  # HP of second active Pokémon
+            hp_p2a,  # HP of opponent's first active Pokémon
+            hp_p2b,  # HP of opponent's second active Pokémon
+            moves_p1a,  # Moves available for Pokémon 1
+            moves_p1b,  # Moves available for Pokémon 2
+            battle.turn,  # Turn number
+            0,  # Placeholder for additional features
+            0,
+            0
+        ])
+
+
+    
     def calc_reward(self, last_state, current_state) -> float:
         return self.reward_computing_helper(
             current_state, fainted_value=2, hp_value=1, victory_value=30
         )
+
+
 
 class MaxDamagePlayer(RandomPlayer):
     def choose_move(self, battle):
@@ -130,10 +174,12 @@ env_player = DoubleBattleRLPlayer(
 )
 second_opponent = MaxDamagePlayer(account_configuration=AccountConfiguration(username="MaxDamAAA", password="a"), battle_format="gen9randomdoublesbattle")
 
+
 NB_TRAINING_STEPS = 10000
 NB_EVALUATION_EPISODES = 100
 
 np.random.seed(0)
+
 
 model_store = {}
 
@@ -142,6 +188,8 @@ def a2c_training(player, nb_steps):
     model = A2C("MlpPolicy", player, verbose=1)
     model.learn(total_timesteps=10_000)
     model_store[player] = model
+    
+
 
 def a2c_evaluation(player, nb_episodes):
     # Reset battle statistics
@@ -153,6 +201,8 @@ def a2c_evaluation(player, nb_episodes):
         "A2C Evaluation: %d victories out of %d episodes"
         % (player.n_won_battles, nb_episodes)
     )
+
+
 
 NB_TRAINING_STEPS = 100
 TEST_EPISODES = 100
@@ -170,36 +220,40 @@ if __name__ == "__main__":
         obs, reward, done, _, info = env_player.step(action)
     print("First opponent won", env_player.n_won_battles, "battles")
 
-    # Ensure no battles are running before resetting
+
+    finished_episodes = 0
+    
     env_player.reset_env()
     obs, _ = env_player.reset()
-    finished_episodes = 0
-    while finished_episodes < TEST_EPISODES:
-        done = False
-        while not done:
-            action, _ = model.predict(obs, deterministic=True)
-            obs, reward, done, _, info = env_player.step(action)
+    while True:
+        action, _ = model.predict(obs, deterministic=True)
+        obs, reward, done, _, info = env_player.step(action)
 
-        finished_episodes += 1
-        print(f"Finished episode {finished_episodes}/{TEST_EPISODES}")
-        obs, _ = env_player.reset()
+        if done:
+            finished_episodes += 1
+            if finished_episodes >= TEST_EPISODES:
+                break
+            obs, _ = env_player.reset()
 
     print("Won", env_player.n_won_battles, "battles against", env_player._opponent)
 
     finished_episodes = 0
     env_player._opponent = second_opponent
 
-    # Ensure no battles are running before resetting
-    env_player.reset_env()
-    obs, _ = env_player.reset()
-    while finished_episodes < TEST_EPISODES:
-        done = False
-        while not done:
-            action, _ = model.predict(obs, deterministic=True)
-            obs, reward, done, _, info = env_player.step(action)
+    # Ensure all battles are finished before resetting
+    while env_player.battles:
+        env_player.complete_current_battle()
 
-        finished_episodes += 1
-        print(f"Finished episode {finished_episodes}/{TEST_EPISODES}")
-        obs, _ = env_player.reset()
+    env_player.reset_battles()
+    obs, _ = env_player.reset()
+    while True:
+        action, _ = model.predict(obs, deterministic=True)
+        obs, reward, done, _, info = env_player.step(action)
+
+        if done:
+            finished_episodes += 1
+            if finished_episodes >= TEST_EPISODES:
+                break
+            obs, _ = env_player.reset()
 
     print("Won", env_player.n_won_battles, "battles against", env_player._opponent)
