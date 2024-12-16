@@ -16,4 +16,5 @@ Se recomienda crear un ambiente virtual antes de instalar el proyecto.
     <code>cd pokemon-showdown
       node pokemon-showdown start --no-security</code>
 2. Ejecutar el programa.
-    <code>python poke-rl.py</code>
+    <code>python poke-rl.py</code> (para singles)
+    <code>python doubles-rl.py</code> (para doubles)
